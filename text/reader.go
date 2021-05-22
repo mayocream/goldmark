@@ -48,6 +48,7 @@ type Reader interface {
 	SetPadding(int)
 
 	// Advance advances the internal pointer.
+	// 前进游标
 	Advance(int)
 
 	// AdvanceAndSetPadding advances the internal pointer and add padding to the
@@ -63,6 +64,7 @@ type Reader interface {
 
 	// SkipSpaces skips blank lines and returns a non-blank line.
 	// If it reaches EOF, returns false.
+	// 读取新的一行, 跳过连续的空行
 	SkipBlankLines() (Segment, int, bool)
 
 	// Match performs regular expression matching to current line.
@@ -143,15 +145,19 @@ func (r *reader) ReadRune() (rune, int, error) {
 }
 
 func (r *reader) LineOffset() int {
+	// 默认和使用 advanceLine 读取后重置为 -1
 	if r.lineOffset < 0 {
 		v := 0
+		// read 标记行开始的位置
 		for i := r.head; i < r.pos.Start; i++ {
 			if r.source[i] == '\t' {
+				// 计算 tab 的实际长度, 4 - (到左侧的距离与 4 的余数)
 				v += util.TabWidth(v)
 			} else {
 				v++
 			}
 		}
+		// 减去左侧的 padding
 		r.lineOffset = v - r.pos.Padding
 	}
 	return r.lineOffset

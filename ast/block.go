@@ -125,6 +125,7 @@ func NewTextBlock() *TextBlock {
 }
 
 // A Paragraph struct represents a paragraph of Markdown text.
+// paragragh 是一个容器
 type Paragraph struct {
 	BaseBlock
 }

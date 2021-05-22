@@ -75,6 +75,7 @@ func parseListItem(line []byte) ([6]int, listItemType) {
 	return ret, typ
 }
 
+// 匹配 list
 func matchesListItem(source []byte, strict bool) ([6]int, listItemType) {
 	m, typ := parseListItem(source)
 	if typ != notList && (!strict || strict && m[1] < 4) {
@@ -122,10 +123,12 @@ func (b *listParser) Trigger() []byte {
 
 func (b *listParser) Open(parent ast.Node, reader text.Reader, pc Context) (ast.Node, State) {
 	last := pc.LastOpenedBlock().Node
+	// (?)
 	if _, lok := last.(*ast.List); lok || pc.Get(skipListParser) != nil {
 		pc.Set(skipListParser, nil)
 		return nil, NoChildren
 	}
+	// 读取当前行
 	line, _ := reader.PeekLine()
 	match, typ := matchesListItem(line, true)
 	if typ == notList {

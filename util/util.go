@@ -251,8 +251,10 @@ func DedentPositionPadding(bs []byte, currentPos, paddingv, width int) (pos, pad
 
 // IndentWidth calculate an indent width for the given line.
 func IndentWidth(bs []byte, currentPos int) (width, pos int) {
+	// 行的长度
 	l := len(bs)
 	for i := 0; i < l; i++ {
+		// 从左侧遍历字符
 		b := bs[i]
 		if b == ' ' {
 			width++
@@ -261,6 +263,7 @@ func IndentWidth(bs []byte, currentPos int) (width, pos int) {
 			width += TabWidth(currentPos + width)
 			pos++
 		} else {
+			// 遇到第一个非空字符
 			break
 		}
 	}

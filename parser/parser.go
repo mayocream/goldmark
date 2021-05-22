@@ -755,11 +755,14 @@ func (p *parser) addBlockParser(v util.PrioritizedValue, options map[OptionName]
 			so.SetOption(oname, ovalue)
 		}
 	}
+	// 没有 trigger 标识的都是 free block parser
+	// 只有 paragragh 和 code block parser 没有 trigger
 	if tcs == nil {
 		p.freeBlockParsers = append(p.freeBlockParsers, bp)
 	} else {
 		// block 标识
 		for _, tc := range tcs {
+			// byte 转换成 int
 			if p.blockParsers[tc] == nil {
 				p.blockParsers[tc] = []BlockParser{}
 			}
@@ -900,6 +903,7 @@ func (p *parser) transformParagraph(node *ast.Paragraph, reader text.Reader, pc 
 	return false
 }
 
+// 关闭 block
 func (p *parser) closeBlocks(from, to int, reader text.Reader, pc Context) {
 	blocks := pc.OpenedBlocks()
 	for i := from; i >= to; i-- {
@@ -926,48 +930,68 @@ const (
 	noBlocksOpened
 )
 
+// 打开 block
+// blankLine 标记上一行是否是空行
 func (p *parser) openBlocks(parent ast.Node, blankLine bool, reader text.Reader, pc Context) blockOpenResult {
+	// 结果 int
 	result := blockOpenResult(noBlocksOpened)
 	continuable := false
+	// 最后打开的
 	lastBlock := pc.LastOpenedBlock()
 	if lastBlock.Node != nil {
+		// 继续读取, 是 paragragh 元素
 		continuable = ast.IsParagraph(lastBlock.Node)
 	}
 retry:
 	var bps []BlockParser
+	// 读取一行
 	line, _ := reader.PeekLine()
+	// LineOffset 计算与左侧的距离 (减去了 padding)
+	// w 也是计算与左侧的距离 (没有计算 padding, padding 在上一步计算)
 	w, pos := util.IndentWidth(line, reader.LineOffset())
+	// 视觉宽度大于 Byte 宽度, 可能是包含了 \t
 	if w >= len(line) {
+		// 清空 offset
 		pc.SetBlockOffset(-1)
+		// 清空 Ident
 		pc.SetBlockIndent(-1)
 	} else {
 		pc.SetBlockOffset(pos)
 		pc.SetBlockIndent(w)
 	}
 	if line == nil || line[0] == '\n' {
+		// 一行已经结束了，如果 ast 是需要多行解析的, 跳到下一行
 		goto continuable
 	}
 	bps = p.freeBlockParsers
+	// pos 不在行尾
 	if pos < len(line) {
+		// 查找这个 byte 对应的 int 有没有 block parser
 		bps = p.blockParsers[line[pos]]
+		// 没有的话再赋值给 free block parser
 		if bps == nil {
 			bps = p.freeBlockParsers
 		}
 	}
 	if bps == nil {
+		// 没有 parser, 本次处理完成
 		goto continuable
 	}
 
+	// 遍历 pos 游标所在位置对应的 block parser 是否可以解析 Node
 	for _, bp := range bps {
 		if continuable && result == noBlocksOpened && !bp.CanInterruptParagraph() {
 			continue
 		}
+		// (???)
 		if w > 3 && !bp.CanAcceptIndentedLine() {
 			continue
 		}
 		lastBlock = pc.LastOpenedBlock()
 		last := lastBlock.Node
+		// 打开一个 block
 		node, state := bp.Open(parent, reader, pc)
+		// 如果匹配到了一个元素的特征, 正确的解析成 block
 		if node != nil {
 			// Parser requires last node to be a paragraph.
 			// With table extension:
@@ -982,6 +1006,8 @@ retry:
 			// But 1st line and 2nd line are a table. Thus this paragraph will be transformed
 			// by a paragraph transformer. So this text should be converted to a table and
 			// an empty list.
+			// 是否包含了 RequireParagraph 的 bit flag
+			// (NEXT)
 			if state&RequireParagraph != 0 {
 				if last == parent.LastChild() {
 					// Opened paragraph may be transformed by ParagraphTransformers in
@@ -997,24 +1023,33 @@ retry:
 					}
 				}
 			}
+			// 标记上一行是否是空行
 			node.SetBlankPreviousLines(blankLine)
+			// 这个元素不属于父元素, 将父元素结束
 			if last != nil && last.Parent() == nil {
 				lastPos := len(pc.OpenedBlocks()) - 1
 				p.closeBlocks(lastPos, lastPos, reader, pc)
 			}
+			// 添加子 node, node 是由 block parser 解析出来的
+			// node 是单纯的解析后的元素
+			// block 是包含 Node 和 block parser 的组合
 			parent.AppendChild(parent, node)
 			result = newBlocksOpened
 			be := Block{node, bp}
 			pc.SetOpenedBlocks(append(pc.OpenedBlocks(), be))
+			// 有子元素, 继续重试
 			if state&HasChildren != 0 {
 				parent = node
 				goto retry // try child block
 			}
+			// 只有一个 block parser 可以解析
 			break // no children, can not open more blocks on this line
 		}
 	}
 
 continuable:
+	// 如果没有打开任何 block 并且是 paragragh
+	// 打开了新行, 还没有解析任何元素
 	if result == noBlocksOpened && continuable {
 		state := lastBlock.Parser.Continue(lastBlock.Node, reader, pc)
 		if state&Continue != 0 {
@@ -1063,7 +1098,7 @@ func (p *parser) parseBlocks(parent ast.Node, reader text.Reader, pc Context) {
 	blankLines := make([]lineStat, 0, 128)
 	isBlank := false
 	for { // process blocks separated by blank lines
-		// 只读取非空行, 返回非空行行数
+		// 读取新的一行, 跳过连续的空行
 		_, lines, ok := reader.SkipBlankLines()
 		if !ok {
 			// 遇到 EOF
@@ -1071,18 +1106,22 @@ func (p *parser) parseBlocks(parent ast.Node, reader text.Reader, pc Context) {
 		}
 		// 当前行数
 		lineNum, _ := reader.Position()
+		// 如果空行 `lines` 大于零, 存在连续的空行
 		if lines != 0 {
 			// 清空 slice
 			blankLines = blankLines[0:0]
-			// 当前已经储存的 Blocks
+			// 当前已经储存的 Blocks, (?)
 			l := len(pc.OpenedBlocks())
 			for i := 0; i < l; i++ {
-				// 添加空行 (?)
-				blankLines = append(blankLines, lineStat{lineNum - 1, i, lines != 0})
+				// 添加空行标记
+				// `lineNum - 1` 标记前一行是空行
+				blankLines = append(blankLines, lineStat{lineNum - 1, i, lines != 0}) // (MAYO): always true, remove `lines != 0`
 			}
 		}
+		// 上一行是否是空行, 如果没有读取任何行, 其上就是空行
 		isBlank = isBlankLine(lineNum-1, 0, blankLines)
 		// first, we try to open blocks
+		// 打开 block
 		if p.openBlocks(parent, isBlank, reader, pc) != newBlocksOpened {
 			return
 		}
