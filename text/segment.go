@@ -75,9 +75,11 @@ func (t *Segment) IsEmpty() bool {
 func (t *Segment) TrimRightSpace(buffer []byte) Segment {
 	v := buffer[t.Start:t.Stop]
 	l := util.TrimRightSpaceLength(v)
+	// 没有空格, 不需要 padding
 	if l == len(v) {
 		return NewSegment(t.Start, t.Start)
 	}
+	// 有空格, stop 位置左移空格的 size
 	return NewSegmentPadding(t.Start, t.Stop-l, t.Padding)
 }
 

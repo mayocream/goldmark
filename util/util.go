@@ -399,6 +399,8 @@ func TrimLeftSpaceLength(source []byte) int {
 }
 
 // TrimRightSpaceLength returns a length of trailing space characters.
+// 有空格的话返回空格的大小
+// 没有空格则返回总长度
 func TrimRightSpaceLength(source []byte) int {
 	l := len(source)
 	i := l - 1
@@ -407,9 +409,11 @@ func TrimRightSpaceLength(source []byte) int {
 			break
 		}
 	}
+	// 全部是空格
 	if i < 0 {
 		return l
 	}
+	// 空格的大小
 	return l - 1 - i
 }
 

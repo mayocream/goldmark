@@ -72,7 +72,9 @@ func newIDs() IDs {
 	}
 }
 
+// Generate 为 value 生成唯一 ID
 func (s *ids) Generate(value []byte, kind ast.NodeKind) []byte {
+	// 避免重新分配内存, 改变原 bytes
 	value = util.TrimLeftSpace(value)
 	value = util.TrimRightSpace(value)
 	result := []byte{}
@@ -80,11 +82,13 @@ func (s *ids) Generate(value []byte, kind ast.NodeKind) []byte {
 		v := value[i]
 		l := util.UTF8Len(v)
 		i += int(l)
+		// 忽略 utf8 字符
 		if l != 1 {
 			continue
 		}
 		if util.IsAlphaNumeric(v) {
 			if 'A' <= v && v <= 'Z' {
+				// 转化为小写
 				v += 'a' - 'A'
 			}
 			result = append(result, v)
@@ -99,10 +103,12 @@ func (s *ids) Generate(value []byte, kind ast.NodeKind) []byte {
 			result = []byte("id")
 		}
 	}
+	// 若 Map 中没有已存在的值
 	if _, ok := s.values[util.BytesToReadOnlyString(result)]; !ok {
 		s.values[util.BytesToReadOnlyString(result)] = true
 		return result
 	}
+	// 创建新的带序号的 id
 	for i := 1; ; i++ {
 		newResult := fmt.Sprintf("%s-%d", result, i)
 		if _, ok := s.values[newResult]; !ok {
@@ -124,6 +130,7 @@ type ContextKey int
 var ContextKeyMax ContextKey
 
 // NewContextKey return a new ContextKey value.
+// 生成内容块的 key, 在包加载阶段调用
 func NewContextKey() ContextKey {
 	ContextKeyMax++
 	return ContextKeyMax
@@ -219,6 +226,7 @@ func WithIDs(ids IDs) ContextOption {
 	}
 }
 
+// 不允许并发操作
 type parseContext struct {
 	store         []interface{}
 	ids           IDs
@@ -231,8 +239,10 @@ type parseContext struct {
 }
 
 // NewContext returns a new Context.
+// 解析上下文
 func NewContext(options ...ContextOption) Context {
 	cfg := &ContextConfig{
+		// id 生成器
 		IDs: newIDs(),
 	}
 	for _, option := range options {
@@ -476,6 +486,7 @@ type Parser interface {
 }
 
 // A SetOptioner interface sets the given option to the object.
+// 实现动态配置
 type SetOptioner interface {
 	// SetOption sets the given option to the object.
 	// Unacceptable options may be passed.
@@ -736,6 +747,7 @@ func (p *parser) addBlockParser(v util.PrioritizedValue, options map[OptionName]
 	if !ok {
 		panic(fmt.Sprintf("%v is not a BlockParser", v.Value))
 	}
+	// block 标识
 	tcs := bp.Trigger()
 	so, ok := v.Value.(SetOptioner)
 	if ok {
@@ -746,6 +758,7 @@ func (p *parser) addBlockParser(v util.PrioritizedValue, options map[OptionName]
 	if tcs == nil {
 		p.freeBlockParsers = append(p.freeBlockParsers, bp)
 	} else {
+		// block 标识
 		for _, tc := range tcs {
 			if p.blockParsers[tc] == nil {
 				p.blockParsers[tc] = []BlockParser{}
@@ -783,6 +796,9 @@ func (p *parser) addParagraphTransformer(v util.PrioritizedValue, options map[Op
 	if !ok {
 		panic(fmt.Sprintf("%v is not a ParagraphTransformer", v.Value))
 	}
+	// 实现动态配置
+	// 若 parser 实现 option 接口
+	// 设置配置
 	so, ok := v.Value.(SetOptioner)
 	if ok {
 		for oname, ovalue := range options {
@@ -824,6 +840,7 @@ func WithContext(context Context) ParseOption {
 
 func (p *parser) Parse(reader text.Reader, opts ...ParseOption) ast.Node {
 	p.initSync.Do(func() {
+		// 初始化 parser, 应用 parse config
 		p.config.BlockParsers.Sort()
 		for _, v := range p.config.BlockParsers {
 			p.addBlockParser(v, p.config.Options)
@@ -853,9 +870,12 @@ func (p *parser) Parse(reader text.Reader, opts ...ParseOption) ast.Node {
 		opt(c)
 	}
 	if c.Context == nil {
+		// 创建一个新的上下文
+		// 一个上下文会储存解析过程中关联的块数据
 		c.Context = NewContext()
 	}
 	pc := c.Context
+	// 创建一个 Doc
 	root := ast.NewDocument()
 	p.parseBlocks(root, reader, pc)
 
@@ -1010,39 +1030,54 @@ type lineStat struct {
 	isBlank bool
 }
 
+// 判断是否是空行
 func isBlankLine(lineNum, level int, stats []lineStat) bool {
 	ret := true
 	for i := len(stats) - 1 - level; i >= 0; i-- {
 		ret = false
 		s := stats[i]
+		// 相同行
 		if s.lineNum == lineNum {
 			if s.level < level && s.isBlank {
+				// 当输入 level 更大, 并且是空时返回
 				return true
+				// 当 level 相同, 直接返回 isBlank
 			} else if s.level == level {
 				return s.isBlank
 			}
 		}
+		// 行数小于输入行
 		if s.lineNum < lineNum {
 			return ret
 		}
 	}
+	// 默认返回 true
 	return ret
 }
 
+// 解析 blocks
 func (p *parser) parseBlocks(parent ast.Node, reader text.Reader, pc Context) {
+	// 清空 blocks
 	pc.SetOpenedBlocks([]Block{})
+	// 分配 cap 为 2^7 的空行
 	blankLines := make([]lineStat, 0, 128)
 	isBlank := false
 	for { // process blocks separated by blank lines
+		// 只读取非空行, 返回非空行行数
 		_, lines, ok := reader.SkipBlankLines()
 		if !ok {
+			// 遇到 EOF
 			return
 		}
+		// 当前行数
 		lineNum, _ := reader.Position()
 		if lines != 0 {
+			// 清空 slice
 			blankLines = blankLines[0:0]
+			// 当前已经储存的 Blocks
 			l := len(pc.OpenedBlocks())
 			for i := 0; i < l; i++ {
+				// 添加空行 (?)
 				blankLines = append(blankLines, lineStat{lineNum - 1, i, lines != 0})
 			}
 		}

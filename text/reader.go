@@ -92,10 +92,13 @@ func NewReader(source []byte) Reader {
 	return r
 }
 
+// 清空标志位
 func (r *reader) ResetPosition() {
+	// 记录读取的行数, 因为是直接读取 bytes, 需要手动分割记录行数
 	r.line = -1
 	r.head = 0
 	r.lineOffset = -1
+	// 初始化的时候就会读取一整行
 	r.AdvanceLine()
 }
 
@@ -103,22 +106,29 @@ func (r *reader) Source() []byte {
 	return r.source
 }
 
+// 输入 col 位置标记 , 返回值
 func (r *reader) Value(seg Segment) []byte {
 	return seg.Value(r.source)
 }
 
 func (r *reader) Peek() byte {
+	// 判断有效的 pos 位置
 	if r.pos.Start >= 0 && r.pos.Start < r.sourceLength {
 		if r.pos.Padding != 0 {
+			// 返回空格符
 			return space[0]
 		}
+		// 返回有效字节
 		return r.source[r.pos.Start]
 	}
+	// 读取完成
 	return EOF
 }
 
+// 读取一行
 func (r *reader) PeekLine() ([]byte, Segment) {
 	if r.pos.Start >= 0 && r.pos.Start < r.sourceLength {
+		// 没有已经 Peek 的
 		if r.peekedLine == nil {
 			r.peekedLine = r.pos.Value(r.Source())
 		}
@@ -164,24 +174,31 @@ func (r *reader) PrecendingCharacter() rune {
 	return rn
 }
 
+// 前进 n 个长度
 func (r *reader) Advance(n int) {
 	r.lineOffset = -1
+	// 如果在一行之内, 直接移动游标
 	if n < len(r.peekedLine) && r.pos.Padding == 0 {
+		// 前进 n 个 byte
 		r.pos.Start += n
-		r.peekedLine = nil
+		r.peekedLine = nil // 这里不太理解为什么要清空当前行
 		return
 	}
+	// 清空当前行
 	r.peekedLine = nil
 	l := r.sourceLength
+	// 将游标右移 n 位，若途中碰到换行符则读取下一行并将游标移动
 	for ; n > 0 && r.pos.Start < l; n-- {
 		if r.pos.Padding != 0 {
 			r.pos.Padding--
 			continue
 		}
+		// 如果是换行符就下一行
 		if r.source[r.pos.Start] == '\n' {
 			r.AdvanceLine()
 			continue
 		}
+		// 游标右移
 		r.pos.Start++
 	}
 }
@@ -193,17 +210,23 @@ func (r *reader) AdvanceAndSetPadding(n, padding int) {
 	}
 }
 
+// 读取一整行并将 Pos 标志前进
 func (r *reader) AdvanceLine() {
 	r.lineOffset = -1
 	r.peekedLine = nil
 	r.pos.Start = r.pos.Stop
 	r.head = r.pos.Start
+	// 默认 stop = 0
 	if r.pos.Start < 0 {
 		return
 	}
+	// 遍历文件
 	r.pos.Stop = r.sourceLength
 	for i := r.pos.Start; i < r.sourceLength; i++ {
+		// 获取字符
 		c := r.source[i]
+		// 获取一整行, 以换行符结尾
+		// 例如: "paragraph\n"
 		if c == '\n' {
 			r.pos.Stop = i + 1
 			break
@@ -464,10 +487,13 @@ func (r *blockReader) FindSubMatch(reg *regexp.Regexp) [][]byte {
 func skipBlankLinesReader(r Reader) (Segment, int, bool) {
 	lines := 0
 	for {
+		// 读取当前的一行
 		line, seg := r.PeekLine()
 		if line == nil {
+			// 已经到内容结尾了，最后一行
 			return seg, lines, false
 		}
+		// 判断一行是否都是空字符串, 包含 \n \s 和空格
 		if util.IsBlank(line) {
 			lines++
 			r.AdvanceLine()
@@ -478,15 +504,22 @@ func skipBlankLinesReader(r Reader) (Segment, int, bool) {
 }
 
 func skipSpacesReader(r Reader) (Segment, int, bool) {
+	// 标记空格数量
 	chars := 0
 	for {
+		// 读取当前的一行
 		line, segment := r.PeekLine()
 		if line == nil {
+			// 已经到内容结尾了，最后一行
 			return segment, chars, false
 		}
+		// 遍历每个 byte
 		for i, c := range line {
+			// 是否是空格
 			if util.IsSpace(c) {
+				// 计数增加
 				chars++
+				// 指针前进
 				r.Advance(1)
 				continue
 			}
@@ -530,14 +563,17 @@ func findSubMatchReader(r Reader, reg *regexp.Regexp) [][]byte {
 }
 
 func readRuneReader(r Reader) (rune, int, error) {
+	// 读取一行
 	line, _ := r.PeekLine()
 	if line == nil {
 		return 0, 0, io.EOF
 	}
+	// 解析 utf8
 	rn, size := utf8.DecodeRune(line)
 	if rn == utf8.RuneError {
 		return 0, 0, io.EOF
 	}
+	// 指针前进
 	r.Advance(size)
 	return rn, size, nil
 }
